@@ -1,6 +1,7 @@
 import socket
 import argparse
-from datetime import datetime # Added to track scan duration
+import concurrent.futures # Added for Phase 3 (Multi-threading)
+from datetime import datetime
 
 # Terminal color codes for professional output
 G = '\033[92m'  # Green
@@ -26,18 +27,27 @@ def scan_port(ip, port):
     finally:
         s.close()
 
-def scan_port_range(ip, start_port, end_port):
+
+# ==============================================================
+# PHASE 3: HIGH PERFORMANCE MULTI-THREADING
+# Developed by Member 3: Sathira
+# ==============================================================
+
+def threaded_scan(ip, start_port, end_port, threads):
     print(f"{C}\n[*] Scanning Target: {ip}{R}")
     print(f"{C}[*] Port Range   : {start_port} to {end_port}{R}")
+    print(f"{C}[*] Threads Used : {threads}{R}")
     print(f"{Y}[*] Scan Started : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{R}")
     print("-" * 60)
     
     # Record the start time
     t1 = datetime.now() 
     
-    for port in range(start_port, end_port + 1):
-        scan_port(ip, port)
-        
+    # Using ThreadPoolExecutor for concurrent scanning
+    with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+        for port in range(start_port, end_port + 1):
+            executor.submit(scan_port, ip, port)
+            
     # Record the end time
     t2 = datetime.now() 
     # Calculate total time taken
@@ -69,8 +79,10 @@ if __name__ == "__main__":
     parser.add_argument("target", help="Target IP address to scan (e.g., 127.0.0.1)")
     parser.add_argument("-s", "--start", type=int, default=1, help="Start port (default: 1)")
     parser.add_argument("-e", "--end", type=int, default=100, help="End port (default: 100)")
+    # Added thread argument for Phase 3 requirement
+    parser.add_argument("-t", "--threads", type=int, default=50, help="Number of concurrent threads (default: 50)")
     
     args = parser.parse_args()
     
-    # Pass the parsed arguments to the scan function
-    scan_port_range(args.target, args.start, args.end)
+    # Pass all arguments to Sathira's threaded scan function
+    threaded_scan(args.target, args.start, args.end, args.threads)
