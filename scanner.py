@@ -1,22 +1,76 @@
 import socket
+import argparse
+from datetime import datetime # Added to track scan duration
+
+# Terminal color codes for professional output
+G = '\033[92m'  # Green
+C = '\033[96m'  # Cyan
+Y = '\033[93m'  # Yellow
+R = '\033[0m'   # Reset (Revert to default color)
+
+# ==============================================================
+# PHASE 1: CORE NETWORKING & SCAN LOGIC
+# Developed by Member 1: Jaindu
+# ==============================================================
 
 def scan_port(ip, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(0.5) # Scanner eka stuck wenne nathi wenna timeout ekak
+    s.settimeout(0.5) 
     try:
-        if s.connect_ex((ip, port)) == 0:
-            print(f"[+] Port {port} is OPEN on {ip}")
+        result = s.connect_ex((ip, port))
+        if result == 0:
+            # Print only open ports in green
+            print(f"{G}[+] Port {port:<5} is OPEN on {ip}{R}")
     except:
         pass
     finally:
         s.close()
 
 def scan_port_range(ip, start_port, end_port):
-    print(f"Scanning target {ip} from port {start_port} to {end_port}...")
+    print(f"{C}\n[*] Scanning Target: {ip}{R}")
+    print(f"{C}[*] Port Range   : {start_port} to {end_port}{R}")
+    print(f"{Y}[*] Scan Started : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{R}")
+    print("-" * 60)
+    
+    # Record the start time
+    t1 = datetime.now() 
+    
     for port in range(start_port, end_port + 1):
         scan_port(ip, port)
-    print("Scanning finished!")
+        
+    # Record the end time
+    t2 = datetime.now() 
+    # Calculate total time taken
+    total_time = t2 - t1 
+    
+    print("-" * 60)
+    print(f"{Y}[*] Scanning Finished!{R}")
+    print(f"{C}[*] Total Time Taken : {total_time}{R}\n")
+
+
+# ==============================================================
+# PHASE 4: CLI INTERFACE & ASCII BANNER
+# Developed by Member 2: Dinara
+# ==============================================================
 
 if __name__ == "__main__":
-    # Test karanna meka damme. Passe meka wenas wenawa.
-    scan_port_range("127.0.0.1", 1, 1000)
+    # ASCII Art Banner in Cyan color
+    banner = f"""{C}
+     _   _      _                      _      _____                                 
+    | \ | | ___| |___      _____  _ __| | __ / ____|___ __ _ _ __  _ __   ___ _ __ 
+    |  \| |/ _ \ __\ \ /\ / / _ \| '__| |/ /| (___ / __/ _` | '_ \| '_ \ / _ \ '__|
+    | |\  |  __/ |_ \ V  V / (_) | |  |   <  \___ \ (_| (_| | | | | | | |  __/ |   
+    |_| \_|\___|\__| \_/\_/ \___/|_|  |_|\_\ _____/\___\__,_|_| |_|_| |_|\___|_|   
+    {R}"""
+    print(banner)
+    
+    # Setup argparse for command-line arguments
+    parser = argparse.ArgumentParser(description="Professional Network Port Scanner")
+    parser.add_argument("target", help="Target IP address to scan (e.g., 127.0.0.1)")
+    parser.add_argument("-s", "--start", type=int, default=1, help="Start port (default: 1)")
+    parser.add_argument("-e", "--end", type=int, default=100, help="End port (default: 100)")
+    
+    args = parser.parse_args()
+    
+    # Pass the parsed arguments to the scan function
+    scan_port_range(args.target, args.start, args.end)
