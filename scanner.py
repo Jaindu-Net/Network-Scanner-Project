@@ -5,9 +5,11 @@ import ipaddress # Added for Subnet/CIDR parsing
 from datetime import datetime
 
 # Terminal color codes for professional output
-G = '\033[92m'  # Green
-C = '\033[96m'  # Cyan
-Y = '\033[93m'  # Yellow
+G = '\033[92m'  # Green (Success/Open)
+C = '\033[96m'  # Cyan (Info/Banner)
+Y = '\033[93m'  # Yellow (Status/Warnings)
+B = '\033[94m'  # Blue (Borders/Decorations)
+RD = '\033[91m' # Red (Errors)
 R = '\033[0m'   # Reset (Revert to default color)
 
 # ==============================================================
@@ -15,14 +17,23 @@ R = '\033[0m'   # Reset (Revert to default color)
 # Developed by Member 1: Jaindu
 # ==============================================================
 
+def get_service_name(port):
+    """ Attempt to find the service name for a given port """
+    try:
+        return socket.getservbyport(port, "tcp")
+    except:
+        return "unknown"
+
 def scan_port(ip, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(0.5) 
     try:
         result = s.connect_ex((ip, port))
         if result == 0:
-            # Print only open ports in green
-            print(f"{G}[+] Port {port:<5} is OPEN on {ip}{R}")
+            # Service identification logic by Jaindu
+            service = get_service_name(port)
+            # Borderless Table alignment for scan results
+            print(f"{G}  {port:>5}/TCP    {service:<15}  OPEN    ->  {ip}{R}")
     except:
         pass
     finally:
@@ -43,44 +54,55 @@ def threaded_scan(target, start_port, end_port, threads):
         # Determine if the target is a single IP or a CIDR block
         network = ipaddress.ip_network(target, strict=False)
         
-        # If it's a single IP, extract it. If it's a subnet, extract all host IPs.
         if network.num_addresses == 1:
             ip_list = [str(network.network_address)]
         else:
             ip_list = [str(ip) for ip in network.hosts()]
             
     except ValueError:
-        print(f"{Y}[!] Error: Invalid Target format. Please use a valid IP or CIDR (e.g., 192.168.1.0/24){R}")
+        print(f"\n{RD}[!] CRITICAL ERROR: Invalid Target format.{R}")
+        print(f"{Y}    Please use a valid IP or CIDR (e.g., 192.168.1.1 or 192.168.1.0/24){R}\n")
         return
     # ==========================================
     # END OF SUBNET PARSING LOGIC (Jaindu)
     # ==========================================
 
-    print(f"{C}\n[*] Scanning Target : {target}{R}")
-    print(f"{C}[*] Total Hosts   : {len(ip_list)}{R}")
-    print(f"{C}[*] Port Range    : {start_port} to {end_port}{R}")
-    print(f"{C}[*] Threads Used  : {threads}{R}")
-    print(f"{Y}[*] Scan Started  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{R}")
-    print("-" * 60)
+    # Formatting variables
+    range_info = f"{start_port} to {end_port}"
+    time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    target_str = str(target)
+
+    # Professional UI Box for Scan Information
+    print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
+    print(f"{B}│ {C}SCAN INFORMATION                                         {B}│{R}")
+    print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
+    print(f"{B}│ {Y}Target(s)      : {C}{target_str:<39} {B}│{R}")
+    print(f"{B}│ {Y}Total Hosts    : {C}{str(len(ip_list)):<39} {B}│{R}")
+    print(f"{B}│ {Y}Port Range     : {C}{range_info:<39} {B}│{R}")
+    print(f"{B}│ {Y}Threads Used   : {C}{str(threads):<39} {B}│{R}")
+    print(f"{B}│ {Y}Started At     : {C}{time_now:<39} {B}│{R}")
+    print(f"{B}└──────────────────────────────────────────────────────────┘{R}")
     
-    # Record the start time
+    print(f"\n{Y}[*] Initiating scan sequence... Please wait.{R}\n")
+    
     t1 = datetime.now() 
     
-    # Using ThreadPoolExecutor for concurrent scanning across multiple IPs and Ports
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
         for ip in ip_list:
             for port in range(start_port, end_port + 1):
-                # Submit tasks for all IPs and Ports
                 executor.submit(scan_port, ip, port)
                 
-    # Record the end time
     t2 = datetime.now() 
-    # Calculate total time taken
+    # Calculate time with milliseconds for high precision
     total_time = t2 - t1 
+    time_display = str(total_time)[:-3] # Truncate to 3 decimal places for milliseconds
     
-    print("-" * 60)
-    print(f"{Y}[*] Scanning Finished!{R}")
-    print(f"{C}[*] Total Time Taken : {total_time}{R}\n")
+    # Professional UI Box for Scan Completion - Precision update
+    print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
+    print(f"{B}│ {G}SCAN COMPLETE!                                           {B}│{R}")
+    print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
+    print(f"{B}│ {Y}Total Time Taken : {C}{time_display:<37} {B}│{R}")
+    print(f"{B}└──────────────────────────────────────────────────────────┘{R}\n")
 
 
 # ==============================================================
@@ -89,25 +111,23 @@ def threaded_scan(target, start_port, end_port, threads):
 # ==============================================================
 
 if __name__ == "__main__":
-    # ASCII Art Banner in Cyan color
     banner = f"""{C}
-     _   _      _                      _      _____                                 
-    | \ | | ___| |___      _____  _ __| | __ / ____|___ __ _ _ __  _ __   ___ _ __ 
-    |  \| |/ _ \ __\ \ /\ / / _ \| '__| |/ /| (___ / __/ _` | '_ \| '_ \ / _ \ '__|
-    | |\  |  __/ |_ \ V  V / (_) | |  |   <  \___ \ (_| (_| | | | | | | |  __/ |   
-    |_| \_|\___|\__| \_/\_/ \___/|_|  |_|\_\ _____/\___\__,_|_| |_|_| |_|\___|_|   
-    {R}"""
+  _   _      _                      _          _____                                 
+ | \ | | ___| |___      _____  _ __| | __     / ____|___ __ _ _ __  _ __   ___ _ __ 
+ |  \| |/ _ \ __\ \ /\ / / _ \| '__| |/ /    | (___ / __/ _` | '_ \| '_ \ / _ \ '__|
+ | |\  |  __/ |_ \ V  V / (_) | |  |   <      \___ \ (_| (_| | | | | | | |  __/ |   
+ |_| \_|\___|\__| \_/\_/ \___/|_|  |_|\_\     _____/\___\__,_|_| |_|_| |_|\___|_|   
+                                                                                    
+ {B}════════════════════════════════════════════════════════════════════════════════════
+                  {Y}Professional Network Discovery & Auditing Tool
+ {B}════════════════════════════════════════════════════════════════════════════════════{R}"""
     print(banner)
     
-    # Setup argparse for command-line arguments
     parser = argparse.ArgumentParser(description="Professional Network Port Scanner")
-    # Updated description to indicate CIDR support
-    parser.add_argument("target", help="Target IP address or CIDR block (e.g., 192.168.1.1 or 192.168.1.0/24)")
-    parser.add_argument("-s", "--start", type=int, default=1, help="Start port (default: 1)")
-    parser.add_argument("-e", "--end", type=int, default=100, help="End port (default: 100)")
-    parser.add_argument("-t", "--threads", type=int, default=50, help="Number of concurrent threads (default: 50)")
+    parser.add_argument("target", help="Target IP or CIDR (e.g., 192.168.1.1 or 192.168.1.0/24)")
+    parser.add_argument("-s", "--start", type=int, default=1, help="Start port")
+    parser.add_argument("-e", "--end", type=int, default=100, help="End port")
+    parser.add_argument("-t", "--threads", type=int, default=50, help="Threads")
     
     args = parser.parse_args()
-    
-    # Pass all arguments to Sathira's threaded scan function
     threaded_scan(args.target, args.start, args.end, args.threads)
