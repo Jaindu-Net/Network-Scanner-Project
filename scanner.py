@@ -28,7 +28,7 @@ def get_service_name(port):
 def scan_port(ip, port):
     """ Attempt a TCP connection to determine if the specified port is open """
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(0.5) 
+    s.settimeout(0.2) # Optimized for faster scanning
     try:
         result = s.connect_ex((ip, port))
         if result == 0:
@@ -48,62 +48,77 @@ def scan_port(ip, port):
     return None 
 
 # ==============================================================
-# PHASE 3: HIGH-PERFORMANCE MULTI-THREADING ENGINE
+# PHASE 3: ADVANCED HYBRID MULTI-LEVEL THREADING ENGINE
 # Developed by Member 3: Sathira 
 # ==============================================================
 
 def threaded_scan(target, start_port, end_port, threads):
     # ---------------------------------------------------------
-    # SUBNET PARSING LOGIC
+    # SUBNET PARSING & DNS RESOLUTION LOGIC (START)
     # Developed by Member 1: Jaindu
     # ---------------------------------------------------------
+    target_str = str(target)
     try:
+        # First, try to parse as IP or CIDR Subnet
         network = ipaddress.ip_network(target, strict=False)
         if network.num_addresses == 1:
             ip_list = [str(network.network_address)]
         else:
             ip_list = [str(ip) for ip in network.hosts()]
     except ValueError:
-        print(f"\n{RD}[!] CRITICAL ERROR: Invalid Target format.{R}")
-        return None
+        # If it fails, assume it's a domain name and try DNS Resolution
+        try:
+            resolved_ip = socket.gethostbyname(target)
+            ip_list = [resolved_ip]
+            print(f"\n{Y}[*] Resolved Domain: {C}{target}{Y} -> {G}{resolved_ip}{R}")
+            target_str = f"{target} ({resolved_ip})"
+        except socket.gaierror:
+            print(f"\n{RD}[!] CRITICAL ERROR: Invalid Target IP or Unreachable Domain '{target}'.{R}")
+            return None
+    # ---------------------------------------------------------
+    # SUBNET PARSING & DNS RESOLUTION LOGIC (END)
     # ---------------------------------------------------------
 
     range_info = f"{start_port} to {end_port}"
     time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    target_str = str(target)
+    total_hosts = len(ip_list)
 
-    # Render the scan initialization dashboard
+    # UI: Detailed Scan Information Table
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
     print(f"{B}│ {C}SCAN INFORMATION                                         {B}│{R}")
     print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
     print(f"{B}│ {Y}Target(s)      : {C}{target_str:<39} {B}│{R}")
+    print(f"{B}│ {Y}Total Hosts    : {C}{str(total_hosts):<39} {B}│{R}")
+    print(f"{B}│ {Y}Port Range     : {C}{range_info:<39} {B}│{R}")
     print(f"{B}│ {Y}Threads Used   : {C}{str(threads):<39} {B}│{R}")
+    print(f"{B}│ {Y}Started At     : {C}{time_now:<39} {B}│{R}")
     print(f"{B}└──────────────────────────────────────────────────────────┘{R}\n")
     
     t1 = datetime.now() 
     open_ports_data = [] 
 
     # ---------------------------------------------------------
-    # MULTI-THREADING CORE LOGIC
+    # HYBRID EXECUTION LOGIC (START)
     # Developed by Member 3: Sathira
     # ---------------------------------------------------------
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-        futures = []
+        scan_tasks = []
         for ip in ip_list:
             for port in range(start_port, end_port + 1):
-                futures.append(executor.submit(scan_port, ip, port))
+                scan_tasks.append(executor.submit(scan_port, ip, port))
                 
-        for future in concurrent.futures.as_completed(futures):
+        for future in concurrent.futures.as_completed(scan_tasks):
             result_data = future.result()
             if result_data: 
                 open_ports_data.append(result_data)
+    # ---------------------------------------------------------
+    # HYBRID EXECUTION LOGIC (END)
+    # ---------------------------------------------------------
                 
     t2 = datetime.now() 
     time_display = str(t2 - t1)[:-3] 
     
-    # ---------------------------------------------------------
-    # RESTORED UI: Render the scan completion dashboard
-    # ---------------------------------------------------------
+    # UI: Scan completion dashboard
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
     print(f"{B}│ {G}SCAN COMPLETE!                                           {B}│{R}")
     print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
@@ -184,14 +199,13 @@ def threaded_scan(target, start_port, end_port, threads):
 # ==============================================================
 
 if __name__ == "__main__":
-    # Updated ASCII Banner with a wide gap for a clean, minimalist look
     banner = f"""{C}
-  _   _          _____                           _____  _____   ____  
- | \ | |        / ____|                         |  __ \|  __ \ / __ \ 
- |  \| | _____ | (___   ___ __ _ _ __           | |__) | |__) | |  | |
- | . ` |/ _ \ \/ \___ \ / __/ _` | '_ \         |  ___/|  _  /| |  | |
- | |\  |  __/>  <____) | (_| (_| | | | |        | |    | | \ \| |__| |
- |_| \_|\___/_/\_\_____/ \___\__,_|_| |_|       |_|    |_|  \_\\____/ 
+  _   _          _____                             _____  _____   ____  
+ | \ | |        / ____|                           |  __ \|  __ \ / __ \ 
+ |  \| | _____ | (___     ___ __ _ _ __           | |__) | |__) | |  | |
+ | . ` |/ _ \ \/ \___ \  / __/ _` | '_  \         |  ___/|  _  /| |  | |
+ | |\  |  __/>  <____) || (_| (_| | | | |         | |    | | \ \| |__| |
+ |_| \_|\___/_/\_\_____/ \___\__,_|_| |_|         |_|    |_|  \_\\_____/ 
                                         
  {B}════════════════════════════════════════════════════════════════════════════════════
                         {Y}NexScan Pro - Network Auditing Suite
@@ -199,10 +213,10 @@ if __name__ == "__main__":
     print(banner)
     
     parser = argparse.ArgumentParser(description="NexScan Pro - Professional Network Port Scanner")
-    parser.add_argument("target", help="Target IP or CIDR")
+    parser.add_argument("target", help="Target IP, CIDR, or Domain Name")
     parser.add_argument("-s", "--start", type=int, default=1, help="Start port")
     parser.add_argument("-e", "--end", type=int, default=100, help="End port")
-    parser.add_argument("-t", "--threads", type=int, default=50, help="Threads")
+    parser.add_argument("-t", "--threads", type=int, default=100, help="Threads")
     
     args = parser.parse_args()
     threaded_scan(args.target, args.start, args.end, args.threads)
