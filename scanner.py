@@ -6,12 +6,12 @@ from datetime import datetime
 import json 
 
 # Terminal color codes for professional output
-G = '\033[92m'  # Green (Success/Open)
-C = '\033[96m'  # Cyan (Info/Banner)
-Y = '\033[93m'  # Yellow (Status/Warnings)
-B = '\033[94m'  # Blue (Borders/Decorations)
-RD = '\033[91m' # Red (Errors)
-R = '\033[0m'   # Reset (Revert to default color)
+G = '\033[92m'  # Green
+C = '\033[96m'  # Cyan
+Y = '\033[93m'  # Yellow
+B = '\033[94m'  # Blue
+RD = '\033[91m' # Red
+R = '\033[0m'   # Reset
 
 # ==============================================================
 # PHASE 1: CORE NETWORKING & SCAN LOGIC
@@ -32,12 +32,9 @@ def scan_port(ip, port):
     try:
         result = s.connect_ex((ip, port))
         if result == 0:
-            # Resolve the service name upon successful connection
             service = get_service_name(port)
-            # Display the result via standard output
             print(f"{G}  {port:>5}/TCP    {service:<15}  OPEN    ->  {ip}{R}")
             
-            # Return structured data for the reporting engine
             return {
                 "ip": ip,
                 "port": port,
@@ -48,40 +45,29 @@ def scan_port(ip, port):
         pass
     finally:
         s.close()
-    
-    # Return None if the port is closed or unreachable
     return None 
 
-
 # ==============================================================
-# PHASE 3: HIGH PERFORMANCE MULTI-THREADING & SUBNET SCANNING
-# Developed by Member 3: Sathira
+# PHASE 3: HIGH-PERFORMANCE MULTI-THREADING ENGINE
+# Developed by Member 3: Sathira 
 # ==============================================================
 
 def threaded_scan(target, start_port, end_port, threads):
-    # ==========================================
-    # SUBNET PARSING LOGIC (START)
+    # ---------------------------------------------------------
+    # SUBNET PARSING LOGIC
     # Developed by Member 1: Jaindu
-    # ==========================================
+    # ---------------------------------------------------------
     try:
-        # Evaluate whether the target is a single IP address or a CIDR subnet block
         network = ipaddress.ip_network(target, strict=False)
-        
         if network.num_addresses == 1:
             ip_list = [str(network.network_address)]
         else:
-            # Generate a comprehensive list of host IP addresses within the subnet
             ip_list = [str(ip) for ip in network.hosts()]
-            
     except ValueError:
         print(f"\n{RD}[!] CRITICAL ERROR: Invalid Target format.{R}")
-        print(f"{Y}    Please use a valid IP or CIDR (e.g., 192.168.1.1 or 192.168.1.0/24){R}\n")
-        return
-    # ==========================================
-    # END OF SUBNET PARSING LOGIC 
-    # ==========================================
+        return None
+    # ---------------------------------------------------------
 
-    # Define variables for reporting and UI formatting
     range_info = f"{start_port} to {end_port}"
     time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     target_str = str(target)
@@ -91,40 +77,33 @@ def threaded_scan(target, start_port, end_port, threads):
     print(f"{B}│ {C}SCAN INFORMATION                                         {B}│{R}")
     print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
     print(f"{B}│ {Y}Target(s)      : {C}{target_str:<39} {B}│{R}")
-    print(f"{B}│ {Y}Total Hosts    : {C}{str(len(ip_list)):<39} {B}│{R}")
-    print(f"{B}│ {Y}Port Range     : {C}{range_info:<39} {B}│{R}")
     print(f"{B}│ {Y}Threads Used   : {C}{str(threads):<39} {B}│{R}")
-    print(f"{B}│ {Y}Started At     : {C}{time_now:<39} {B}│{R}")
-    print(f"{B}└──────────────────────────────────────────────────────────┘{R}")
+    print(f"{B}└──────────────────────────────────────────────────────────┘{R}\n")
     
-    print(f"\n{Y}[*] Initiating scan sequence... Please wait.{R}\n")
-    
-    # Record the precise start time
     t1 = datetime.now() 
-    
-    # Initialize an array to collect data from successful connections
     open_ports_data = [] 
 
-    # Execute the multi-threaded scanning sequence
+    # ---------------------------------------------------------
+    # MULTI-THREADING CORE LOGIC
+    # Developed by Member 3: Sathira
+    # ---------------------------------------------------------
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
         futures = []
         for ip in ip_list:
             for port in range(start_port, end_port + 1):
-                # Submit tasks to the thread pool and store the future objects
                 futures.append(executor.submit(scan_port, ip, port))
                 
-        # Aggregate the results as each thread completes its execution
         for future in concurrent.futures.as_completed(futures):
             result_data = future.result()
             if result_data: 
                 open_ports_data.append(result_data)
                 
-    # Record the precise completion time and calculate total duration
     t2 = datetime.now() 
-    total_time = t2 - t1 
-    time_display = str(total_time)[:-3] 
+    time_display = str(t2 - t1)[:-3] 
     
-    # Render the scan completion dashboard
+    # ---------------------------------------------------------
+    # RESTORED UI: Render the scan completion dashboard
+    # ---------------------------------------------------------
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
     print(f"{B}│ {G}SCAN COMPLETE!                                           {B}│{R}")
     print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
@@ -135,48 +114,69 @@ def threaded_scan(target, start_port, end_port, threads):
     # PHASE 5: ENTERPRISE REPORTING ENGINE (JSON EXPORT)
     # Developed by Member 1: Jaindu
     # ==============================================================
-    print(f"{Y}[*] Generating Advanced JSON Report...{R}")
+    print(f"{Y}[*] Generating Ultra-Premium JSON Report...{R}")
     
-    # Organize the flat list into a dictionary grouped by IP address
+    critical_ports = {
+        21: "FTP - Cleartext data transfer (High Risk)",
+        23: "Telnet - Cleartext communication (Critical Risk)",
+        22: "SSH - Secure but requires strong credentials",
+        80: "HTTP - Unencrypted web traffic (Medium Risk)",
+        443: "HTTPS - Encrypted web traffic (Low Risk)",
+        445: "SMB - Target for Ransomware/WannaCry (Critical Risk)",
+        3389: "RDP - Remote Desktop Protocol (High Risk)",
+        3306: "MySQL - Database access (Medium Risk)"
+    }
+
     structured_results = {}
     for entry in open_ports_data:
         ip = entry["ip"]
-        if ip not in structured_results:
-            structured_results[ip] = []
+        port = entry["port"]
         
-        structured_results[ip].append({
-            "port": entry["port"],
-            "service": entry["service"],
-            "state": entry["state"]
+        if ip not in structured_results:
+            structured_results[ip] = {
+                "host_status": "UP",
+                "total_open_ports": 0,
+                "overall_risk": "Low",
+                "open_ports": []
+            }
+            
+        sec_note = critical_ports.get(port, "Standard network service")
+        
+        if port in [21, 23, 445, 3389]:
+            structured_results[ip]["overall_risk"] = "Critical"
+        elif port in [22, 80, 3306] and structured_results[ip]["overall_risk"] != "Critical":
+            structured_results[ip]["overall_risk"] = "Medium"
+            
+        structured_results[ip]["open_ports"].append({
+            "port": port, "service": entry["service"], "state": entry["state"], "security_note": sec_note
         })
+        structured_results[ip]["total_open_ports"] += 1
 
-    # Sort the ports numerically for each IP to ensure a clean layout
     for ip in structured_results:
-        structured_results[ip] = sorted(structured_results[ip], key=lambda x: x["port"])
+        structured_results[ip]["open_ports"] = sorted(structured_results[ip]["open_ports"], key=lambda x: x["port"])
 
-    # Define the advanced data structure for the JSON report
     report_content = {
         "scan_metadata": {
-            "target": target_str,
-            "port_range": range_info,
-            "start_time": time_now,
-            "total_time_elapsed": time_display,
-            "threads_used": threads,
-            "total_open_ports_found": len(open_ports_data)
+            "tool_name": "NexScan Pro Auditing Suite",
+            "version": "1.0",
+            "target_network": target_str,
+            "port_range_scanned": range_info,
+            "scan_start_time": time_now,
+            "total_execution_time": time_display,
+            "thread_workers_used": threads,
+            "total_active_hosts": len(structured_results)
         },
         "scan_results": structured_results
     }
 
-    # Generate a unique filename using the current date and time
     filename_time = datetime.now().strftime('%Y%m%d_%H%M%S')
     report_filename = f"scan_report_{filename_time}.json"
 
-    # Write the structured data into the JSON file with sorting and indentation
     with open(report_filename, "w") as json_file:
         json.dump(report_content, json_file, indent=4, sort_keys=True)
 
-    print(f"{G}[+] Successfully saved advanced report to: {report_filename}{R}\n")
-
+    print(f"{G}[+] Successfully saved enterprise report to: {report_filename}{R}")
+    return report_filename 
 
 # ==============================================================
 # PHASE 4: CLI INTERFACE & ASCII BANNER
@@ -184,26 +184,25 @@ def threaded_scan(target, start_port, end_port, threads):
 # ==============================================================
 
 if __name__ == "__main__":
-    # Define and render the application banner
+    # Updated ASCII Banner with a wide gap for a clean, minimalist look
     banner = f"""{C}
-  _   _      _                      _          _____                                
- | \ | | ___| |___      _____  _ __| | __     / ____|___ __ _ _ __  _ __   ___ _ __ 
- |  \| |/ _ \ __\ \ /\ / / _ \| '__| |/ /    | (___ / __/ _` | '_ \| '_ \ / _ \ '__|
- | |\  |  __/ |_ \ V  V / (_) | |  |   <      \___ \ (_| (_| | | | | | | |  __/ |   
- |_| \_|\___|\__| \_/\_/ \___/|_|  |_|\_\     _____/\___\__,_|_| |_|_| |_|\___|_|   
-                                                                                    
+  _   _          _____                           _____  _____   ____  
+ | \ | |        / ____|                         |  __ \|  __ \ / __ \ 
+ |  \| | _____ | (___   ___ __ _ _ __           | |__) | |__) | |  | |
+ | . ` |/ _ \ \/ \___ \ / __/ _` | '_ \         |  ___/|  _  /| |  | |
+ | |\  |  __/>  <____) | (_| (_| | | | |        | |    | | \ \| |__| |
+ |_| \_|\___/_/\_\_____/ \___\__,_|_| |_|       |_|    |_|  \_\\____/ 
+                                        
  {B}════════════════════════════════════════════════════════════════════════════════════
-                  {Y}Professional Network Discovery & Auditing Tool
+                        {Y}NexScan Pro - Network Auditing Suite
  {B}════════════════════════════════════════════════════════════════════════════════════{R}"""
     print(banner)
     
-    # Configure the argument parser for command-line inputs
-    parser = argparse.ArgumentParser(description="Professional Network Port Scanner")
-    parser.add_argument("target", help="Target IP or CIDR (e.g., 192.168.1.1 or 192.168.1.0/24)")
+    parser = argparse.ArgumentParser(description="NexScan Pro - Professional Network Port Scanner")
+    parser.add_argument("target", help="Target IP or CIDR")
     parser.add_argument("-s", "--start", type=int, default=1, help="Start port")
     parser.add_argument("-e", "--end", type=int, default=100, help="End port")
     parser.add_argument("-t", "--threads", type=int, default=50, help="Threads")
     
-    # Parse the arguments and trigger the primary scanning sequence
     args = parser.parse_args()
     threaded_scan(args.target, args.start, args.end, args.threads)
