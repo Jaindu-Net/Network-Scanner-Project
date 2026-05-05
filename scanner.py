@@ -54,7 +54,7 @@ def scan_port(ip, port):
 
 def threaded_scan(target, start_port, end_port, threads):
     # ---------------------------------------------------------
-    # SUBNET PARSING & DNS RESOLUTION LOGIC (START)
+    # SUBNET PARSING LOGIC
     # Developed by Member 1: Jaindu
     # ---------------------------------------------------------
     target_str = str(target)
@@ -76,12 +76,10 @@ def threaded_scan(target, start_port, end_port, threads):
             print(f"\n{RD}[!] CRITICAL ERROR: Invalid Target IP or Unreachable Domain '{target}'.{R}")
             return None
     # ---------------------------------------------------------
-    # SUBNET PARSING & DNS RESOLUTION LOGIC (END)
-    # ---------------------------------------------------------
 
     range_info = f"{start_port} to {end_port}"
     time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    total_hosts = len(ip_list)
+    target_str = str(target)
 
     # UI: Detailed Scan Information Table
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
@@ -200,12 +198,12 @@ def threaded_scan(target, start_port, end_port, threads):
 
 if __name__ == "__main__":
     banner = f"""{C}
-  _   _          _____                             _____  _____   ____  
- | \ | |        / ____|                           |  __ \|  __ \ / __ \ 
- |  \| | _____ | (___     ___ __ _ _ __           | |__) | |__) | |  | |
- | . ` |/ _ \ \/ \___ \  / __/ _` | '_  \         |  ___/|  _  /| |  | |
- | |\  |  __/>  <____) || (_| (_| | | | |         | |    | | \ \| |__| |
- |_| \_|\___/_/\_\_____/ \___\__,_|_| |_|         |_|    |_|  \_\\_____/ 
+  _   _          _____                           _____  _____   ____  
+ | \ | |        / ____|                         |  __ \|  __ \ / __ \ 
+ |  \| | _____ | (___   ___ __ _ _ __           | |__) | |__) | |  | |
+ | . ` |/ _ \ \/ \___ \ / __/ _` | '_ \         |  ___/|  _  /| |  | |
+ | |\  |  __/>  <____) | (_| (_| | | | |        | |    | | \ \| |__| |
+ |_| \_|\___/_/\_\_____/ \___\__,_|_| |_|       |_|    |_|  \_\\____/ 
                                         
  {B}════════════════════════════════════════════════════════════════════════════════════
                         {Y}NexScan Pro - Network Auditing Suite
