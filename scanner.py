@@ -48,13 +48,13 @@ def scan_port(ip, port):
     return None 
 
 # ==============================================================
-# PHASE 3: HIGH-PERFORMANCE MULTI-THREADING ENGINE
+# PHASE 3: ADVANCED HYBRID MULTI-LEVEL THREADING ENGINE
 # Developed by Member 3: Sathira 
 # ==============================================================
 
 def threaded_scan(target, start_port, end_port, threads):
     # ---------------------------------------------------------
-    # SUBNET PARSING LOGIC
+    # SUBNET PARSING LOGIC (START)
     # Developed by Member 1: Jaindu
     # ---------------------------------------------------------
     try:
@@ -67,43 +67,50 @@ def threaded_scan(target, start_port, end_port, threads):
         print(f"\n{RD}[!] CRITICAL ERROR: Invalid Target format.{R}")
         return None
     # ---------------------------------------------------------
+    # SUBNET PARSING LOGIC (END)
+    # ---------------------------------------------------------
 
     range_info = f"{start_port} to {end_port}"
     time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    total_hosts = len(ip_list)
     target_str = str(target)
 
-    # Render the scan initialization dashboard
+    # UI: Detailed Scan Information Table
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
     print(f"{B}│ {C}SCAN INFORMATION                                         {B}│{R}")
     print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
     print(f"{B}│ {Y}Target(s)      : {C}{target_str:<39} {B}│{R}")
+    print(f"{B}│ {Y}Total Hosts    : {C}{str(total_hosts):<39} {B}│{R}")
+    print(f"{B}│ {Y}Port Range     : {C}{range_info:<39} {B}│{R}")
     print(f"{B}│ {Y}Threads Used   : {C}{str(threads):<39} {B}│{R}")
+    print(f"{B}│ {Y}Started At     : {C}{time_now:<39} {B}│{R}")
     print(f"{B}└──────────────────────────────────────────────────────────┘{R}\n")
     
     t1 = datetime.now() 
     open_ports_data = [] 
 
     # ---------------------------------------------------------
-    # MULTI-THREADING CORE LOGIC
+    # HYBRID EXECUTION LOGIC (START)
     # Developed by Member 3: Sathira
     # ---------------------------------------------------------
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-        futures = []
+        scan_tasks = []
         for ip in ip_list:
             for port in range(start_port, end_port + 1):
-                futures.append(executor.submit(scan_port, ip, port))
+                scan_tasks.append(executor.submit(scan_port, ip, port))
                 
-        for future in concurrent.futures.as_completed(futures):
+        for future in concurrent.futures.as_completed(scan_tasks):
             result_data = future.result()
             if result_data: 
                 open_ports_data.append(result_data)
+    # ---------------------------------------------------------
+    # HYBRID EXECUTION LOGIC (END)
+    # ---------------------------------------------------------
                 
     t2 = datetime.now() 
     time_display = str(t2 - t1)[:-3] 
     
-    # ---------------------------------------------------------
-    # RESTORED UI: Render the scan completion dashboard
-    # ---------------------------------------------------------
+    # UI: Scan completion dashboard
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
     print(f"{B}│ {G}SCAN COMPLETE!                                           {B}│{R}")
     print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
@@ -184,13 +191,12 @@ def threaded_scan(target, start_port, end_port, threads):
 # ==============================================================
 
 if __name__ == "__main__":
-    # Updated ASCII Banner with a wide gap for a clean, minimalist look
     banner = f"""{C}
   _   _          _____                           _____  _____   ____  
  | \ | |        / ____|                         |  __ \|  __ \ / __ \ 
- |  \| | _____ | (___   ___ __ _ _ __           | |__) | |__) | |  | |
- | . ` |/ _ \ \/ \___ \ / __/ _` | '_ \         |  ___/|  _  /| |  | |
- | |\  |  __/>  <____) | (_| (_| | | | |        | |    | | \ \| |__| |
+ |  \| | _____ | (___     ___ __ _ _ ___        | |__) | |__) | |  | |
+ | . ` |/ _ \ \/ \___ \  / __/ _` | '_  \       |  ___/|  _  /| |  | |
+ | |\  |  __/>  <____) || (_| (_| | | | |       | |    | | \ \| |__| |
  |_| \_|\___/_/\_\_____/ \___\__,_|_| |_|       |_|    |_|  \_\\____/ 
                                         
  {B}════════════════════════════════════════════════════════════════════════════════════
@@ -202,7 +208,7 @@ if __name__ == "__main__":
     parser.add_argument("target", help="Target IP or CIDR")
     parser.add_argument("-s", "--start", type=int, default=1, help="Start port")
     parser.add_argument("-e", "--end", type=int, default=100, help="End port")
-    parser.add_argument("-t", "--threads", type=int, default=50, help="Threads")
+    parser.add_argument("-t", "--threads", type=int, default=100, help="Threads")
     
     args = parser.parse_args()
     threaded_scan(args.target, args.start, args.end, args.threads)
