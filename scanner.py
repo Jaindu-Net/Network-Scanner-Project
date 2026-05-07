@@ -22,7 +22,7 @@ if sys.platform.startswith('win'):
     threading.excepthook = silent_thread_errors
 
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
-from scapy.all import IP, TCP, send, sniff, sr1
+from scapy.all import IP, TCP, send, sniff
 
 # ==============================================================================
 # TERMINAL COLOR CODES
@@ -59,38 +59,27 @@ def grab_banner(ip, port):
         s.close()
         
         if banner:
-            clean_banner = banner.split('\n')[0].strip()[:40]
-            return clean_banner
+            return banner.split('\n')[0].strip()[:40]
     except:
         pass
     return "Version Unknown"
 
-# New Function 1: Packet sender only (Jaindu)
 def send_syn_packet(ip, port):
-    """
-    Sends a raw SYN packet rapidly without waiting for a response.
-    (Fire-and-forget logic)
-    """
+    """ Fire-and-forget raw SYN packet sender """
     try:
         syn_packet = IP(dst=ip)/TCP(dport=port, flags="S")
         send(syn_packet, verbose=0)
     except Exception:
         pass
 
-# New Function 2: Single sniffer to catch replies (Jaindu)
 def background_sniffer(target_ips, stop_event, open_ports_data):
-    """
-    A single background thread that listens for all incoming SYN-ACK replies.
-    Developed to solve Windows OS resource exhaustion.
-    """
+    """ Single centralized sniffer to catch all SYN-ACK replies """
     def packet_callback(packet):
         if packet.haslayer(TCP) and packet.haslayer(IP):
-            # 0x12 is SYN-ACK. We check if it came from one of our target IPs.
             if packet[IP].src in target_ips and packet.getlayer(TCP).flags == 0x12:
                 ip = packet[IP].src
                 port = packet.getlayer(TCP).sport 
                 
-                # Check if we already recorded this port (prevent duplicates)
                 if not any(d.get('port') == port and d.get('ip') == ip for d in open_ports_data):
                     service = get_service_name(port)
                     version = grab_banner(ip, port)
@@ -109,11 +98,9 @@ def background_sniffer(target_ips, stop_event, open_ports_data):
                         "state": "OPEN"
                     })
 
-    # Create a dynamic BPF filter to only sniff TCP packets from our target IPs
     target_filter = " or ".join([f"src host {ip}" for ip in target_ips])
     sniff_filter = f"tcp and ({target_filter})"
 
-    # Sniff in small chunks so we can check the stop_event frequently
     while not stop_event.is_set():
         sniff(filter=sniff_filter, prn=packet_callback, store=0, timeout=1)
 
@@ -124,7 +111,8 @@ def background_sniffer(target_ips, stop_event, open_ports_data):
 
 # ==============================================================================
 # START OF PHASE 2 & 3: TARGET PARSING & HYBRID MULTI-LEVEL THREADING ENGINE
-# Primary Developer: Sathira (Target Parsing logic handled by Jaindu)
+# Primary Developer: Sathira (Orchestration logic by Dinara)
+# Subnet Parsing Developer: Jaindu
 # ==============================================================================
 
 def threaded_scan(target, start_port, end_port, threads):
@@ -148,16 +136,16 @@ def threaded_scan(target, start_port, end_port, threads):
         except socket.gaierror:
             print(f"\n{RD}[!] CRITICAL ERROR: DNS Resolution failed for '{target}'. Target unreachable.{R}")
             return None
-
-    range_info = f"{start_port} to {end_port}"
-    time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    total_hosts = len(ip_list)
     # ---------------------------------------------------------
     # END OF SUBNET PARSING & DNS RESOLUTION LOGIC (Jaindu)
     # ---------------------------------------------------------
 
+    range_info = f"{start_port} to {end_port}"
+    time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    total_hosts = len(ip_list)
+
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
-    print(f"{B}│ {C}SCAN INFORMATION (STEALTH + VERSION DETECT)              {B}│{R}")
+    print(f"{B}│ {C}SCAN INFORMATION (PRO SNIFFER ENGINE)                    {B}│{R}")
     print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
     print(f"{B}│ {Y}Target(s)      : {C}{target_str:<39} {B}│{R}")
     print(f"{B}│ {Y}Total Hosts    : {C}{str(total_hosts):<39} {B}│{R}")
@@ -170,27 +158,37 @@ def threaded_scan(target, start_port, end_port, threads):
     open_ports_data = [] 
 
     # ---------------------------------------------------------
-    # START OF HYBRID CONCURRENT EXECUTION LOGIC
-    # Developed by: Sathira
-    # (Sathira's old logic remains here for now)
+    # START OF SNIFFER ORCHESTRATION & ASYNC EXECUTION
+    # Developed by: Dinara
     # ---------------------------------------------------------
+    stop_event = threading.Event()
+
+    # Start the background sniffer thread
+    sniffer_thread = threading.Thread(
+        target=background_sniffer,
+        args=(ip_list, stop_event, open_ports_data),
+        daemon=True
+    )
+    sniffer_thread.start()
+
+    # Dispatch SYN packets using Sathira's thread pool architecture
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-        scan_tasks = []
         for ip in ip_list:
             for port in range(start_port, end_port + 1):
-                # Do not run the code yet as it still calls stealth_scan_port!
-                scan_tasks.append(executor.submit(stealth_scan_port, ip, port))
-                
-        for future in concurrent.futures.as_completed(scan_tasks):
-            result_data = future.result()
-            if result_data: 
-                open_ports_data.append(result_data)
-                
+                executor.submit(send_syn_packet, ip, port)
+
+    # Allow 2 seconds for late packets to arrive (Dinara)
+    time.sleep(2.0)
+    
+    # Signal sniffer to stop and wait for it to finish
+    stop_event.set()
+    sniffer_thread.join()
+    # ---------------------------------------------------------
+    # END OF SNIFFER ORCHESTRATION & ASYNC EXECUTION (Dinara)
+    # ---------------------------------------------------------
+    
     t2 = datetime.now() 
     time_display = str(t2 - t1)[:-3] 
-    # ---------------------------------------------------------
-    # END OF HYBRID CONCURRENT EXECUTION LOGIC (Sathira)
-    # ---------------------------------------------------------
     
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
     print(f"{B}│ {G}SCAN COMPLETE!                                           {B}│{R}")
@@ -199,7 +197,7 @@ def threaded_scan(target, start_port, end_port, threads):
     print(f"{B}└──────────────────────────────────────────────────────────┘{R}\n")
 
 # ==============================================================================
-# END OF PHASE 2 & 3: TARGET PARSING & HYBRID THREADING ENGINE 
+# END OF PHASE 2 & 3: TARGET PARSING & HYBRID THREADING ENGINE (Sathira/Dinara)
 # ==============================================================================
 
 
@@ -252,7 +250,7 @@ def threaded_scan(target, start_port, end_port, threads):
     report_content = {
         "scan_metadata": {
             "tool_name": "NexScan Pro Auditing Suite",
-            "version": "1.3 (Cross-Platform Stealth & Version Detect)",
+            "version": "2.0 (Unified Sniffer Engine)",
             "target_network": target_str,
             "port_range_scanned": range_info,
             "scan_start_time": time_now,
@@ -283,12 +281,12 @@ def threaded_scan(target, start_port, end_port, threads):
 
 if __name__ == "__main__":
     banner = f"""{C}
-  _   _           _____                             _____  _____   ____  
- | \ | |         / ____|                           |  __ \|  __ \ / __ \ 
- |  \| | _____  | (___    ___ __ _ _ __            | |__) | |__) | |  | |
- | . ` |/ _ \ \/ \___ \  / __/ _` | '_  \          |  ___/|  _  /| |  | |
- | |\  |  __/>  <____) || (_| (_| | | | |          | |    | | \ \| |__| |
- |_| \_|\___/_/\_\_____/ \___\__,_|_| |_|          |_|    |_|  \_\\_____/ 
+  _   _          _____                                  _____  _____   ____  
+ | \ | |        / ____|                                |  __ \|  __ \ / __ \ 
+ |  \| | _____ | (___   ___ __ _ _ __                  | |__) | |__) | |  | |
+ | . ` |/ _ \ \/ \___ \ / __/ _` | '_ \\                |  ___/|  _  /| |  | |
+ | |\  |  __/>  <____) | (_| (_| | | | |               | |    | | \ \| |__| |
+ |_| \_|\___/_/\_\_____/ \___\__,_|_| |_|              |_|    |_|  \_\\____/ 
                                         
  {B}════════════════════════════════════════════════════════════════════════════════════
          {Y}NexScan Pro - Network Auditing Suite {RD}[STEALTH + VERSION MODE]{Y}
