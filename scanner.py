@@ -7,90 +7,129 @@ import json
 import logging
 import threading 
 import sys       
+import time
 
 # ==============================================================================
-# WINDOWS ERROR SILENCER (NINJA FIX)
-# Suppresses specific Threading OSErrors (Errno 9) during Scapy teardown on Windows.
+# CROSS-PLATFORM OS HANDLER & WINDOWS ERROR SILENCER
 # ==============================================================================
-def silent_thread_errors(args):
-    """ Catch and suppress specific Threading OSErrors silently """
-    if issubclass(args.exc_type, OSError) and getattr(args.exc_value, 'errno', None) == 9:
-        pass
-    else:
-        sys.__excepthook__(args.exc_type, args.exc_value, args.exc_traceback)
+if sys.platform.startswith('win'):
+    def silent_thread_errors(args):
+        if issubclass(args.exc_type, OSError) and getattr(args.exc_value, 'errno', None) in (9, 22):
+            pass
+        else:
+            sys.__excepthook__(args.exc_type, args.exc_value, args.exc_traceback)
 
-threading.excepthook = silent_thread_errors
+    threading.excepthook = silent_thread_errors
 
-# Suppress Scapy runtime warnings for a cleaner CLI experience
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
-from scapy.all import IP, TCP, sr1
+from scapy.all import IP, TCP, send, sniff, sr1
 
 # ==============================================================================
 # TERMINAL COLOR CODES
 # ==============================================================================
-G = '\033[92m'  # Green 
-C = '\033[96m'  # Cyan 
-Y = '\033[93m'  # Yellow 
-B = '\033[94m'  # Blue 
-RD = '\033[91m' # Red 
-R = '\033[0m'   # Reset 
+G = '\033[92m'  
+C = '\033[96m'  
+Y = '\033[93m'  
+B = '\033[94m'  
+RD = '\033[91m' 
+R = '\033[0m'   
 
 # ==============================================================================
-# PHASE 1: CORE NETWORKING & SCAN LOGIC (STEALTH SYN UPGRADE)
+# START OF PHASE 1: CORE NETWORKING & SCAN LOGIC (SINGLE SNIFFER ARCHITECTURE)
 # Primary Developer: Jaindu
+# Features: Async Packet Sending, Centralized Sniffing, Banner Grabbing
 # ==============================================================================
 
 def get_service_name(port):
-    """
-    Attempts to resolve the standard service name (e.g., HTTP, SSH) 
-    associated with a specific TCP port.
-    """
     try:
         return socket.getservbyport(port, "tcp")
     except:
         return "unknown"
 
-def stealth_scan_port(ip, port):
+def grab_banner(ip, port):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1.5)
+        s.connect((ip, port))
+        
+        if port in [80, 8080, 443]:
+            s.send(b"HEAD / HTTP/1.1\r\n\r\n")
+            
+        banner = s.recv(1024).decode('utf-8', errors='ignore').strip()
+        s.close()
+        
+        if banner:
+            clean_banner = banner.split('\n')[0].strip()[:40]
+            return clean_banner
+    except:
+        pass
+    return "Version Unknown"
+
+# New Function 1: Packet sender only (Jaindu)
+def send_syn_packet(ip, port):
     """
-    Executes a Stealth SYN (Half-Open) TCP scan using the Scapy library.
-    Requires Administrative/Root privileges.
+    Sends a raw SYN packet rapidly without waiting for a response.
+    (Fire-and-forget logic)
     """
     try:
         syn_packet = IP(dst=ip)/TCP(dport=port, flags="S")
-        response = sr1(syn_packet, timeout=2.0, verbose=0)
-        
-        if response is None:
-            return None 
-            
-        elif response.haslayer(TCP):
-            if response.getlayer(TCP).flags == 0x12:
-                service = get_service_name(port)
-                
-                print(f"{G}  {port:>5}/TCP    {service:<15}  OPEN (SYN)  ->  {ip}{R}")
-                
-                return {
-                    "ip": ip,
-                    "port": port,
-                    "service": service,
-                    "state": "OPEN"
-                }
-            
-            elif response.getlayer(TCP).flags == 0x14:
-                return None
-                
-    except Exception as e:
+        send(syn_packet, verbose=0)
+    except Exception:
         pass
-        
-    return None
+
+# New Function 2: Single sniffer to catch replies (Jaindu)
+def background_sniffer(target_ips, stop_event, open_ports_data):
+    """
+    A single background thread that listens for all incoming SYN-ACK replies.
+    Developed to solve Windows OS resource exhaustion.
+    """
+    def packet_callback(packet):
+        if packet.haslayer(TCP) and packet.haslayer(IP):
+            # 0x12 is SYN-ACK. We check if it came from one of our target IPs.
+            if packet[IP].src in target_ips and packet.getlayer(TCP).flags == 0x12:
+                ip = packet[IP].src
+                port = packet.getlayer(TCP).sport 
+                
+                # Check if we already recorded this port (prevent duplicates)
+                if not any(d.get('port') == port and d.get('ip') == ip for d in open_ports_data):
+                    service = get_service_name(port)
+                    version = grab_banner(ip, port)
+                    
+                    if version != "Version Unknown":
+                        service_display = f"{service} [{version}]"
+                    else:
+                        service_display = service
+                    
+                    print(f"{G}  {port:>5}/TCP    {service_display:<35}  OPEN (SYN)  ->  {ip}{R}")
+                    
+                    open_ports_data.append({
+                        "ip": ip,
+                        "port": port,
+                        "service": service_display,
+                        "state": "OPEN"
+                    })
+
+    # Create a dynamic BPF filter to only sniff TCP packets from our target IPs
+    target_filter = " or ".join([f"src host {ip}" for ip in target_ips])
+    sniff_filter = f"tcp and ({target_filter})"
+
+    # Sniff in small chunks so we can check the stop_event frequently
+    while not stop_event.is_set():
+        sniff(filter=sniff_filter, prn=packet_callback, store=0, timeout=1)
 
 # ==============================================================================
-# PHASE 2 & 3: TARGET PARSING & HYBRID MULTI-LEVEL THREADING ENGINE
-# Primary Developer: Sathira
+# END OF PHASE 1: CORE NETWORKING & SCAN LOGIC (Jaindu)
+# ==============================================================================
+
+
+# ==============================================================================
+# START OF PHASE 2 & 3: TARGET PARSING & HYBRID MULTI-LEVEL THREADING ENGINE
+# Primary Developer: Sathira (Target Parsing logic handled by Jaindu)
 # ==============================================================================
 
 def threaded_scan(target, start_port, end_port, threads):
     # ---------------------------------------------------------
-    # SUBNET PARSING & DNS RESOLUTION LOGIC
+    # START OF SUBNET PARSING & DNS RESOLUTION LOGIC
     # Developed by: Jaindu
     # ---------------------------------------------------------
     target_str = str(target)
@@ -113,9 +152,12 @@ def threaded_scan(target, start_port, end_port, threads):
     range_info = f"{start_port} to {end_port}"
     time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     total_hosts = len(ip_list)
+    # ---------------------------------------------------------
+    # END OF SUBNET PARSING & DNS RESOLUTION LOGIC (Jaindu)
+    # ---------------------------------------------------------
 
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
-    print(f"{B}│ {C}SCAN INFORMATION (STEALTH SYN MODE)                      {B}│{R}")
+    print(f"{B}│ {C}SCAN INFORMATION (STEALTH + VERSION DETECT)              {B}│{R}")
     print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
     print(f"{B}│ {Y}Target(s)      : {C}{target_str:<39} {B}│{R}")
     print(f"{B}│ {Y}Total Hosts    : {C}{str(total_hosts):<39} {B}│{R}")
@@ -127,10 +169,16 @@ def threaded_scan(target, start_port, end_port, threads):
     t1 = datetime.now() 
     open_ports_data = [] 
 
+    # ---------------------------------------------------------
+    # START OF HYBRID CONCURRENT EXECUTION LOGIC
+    # Developed by: Sathira
+    # (Sathira's old logic remains here for now)
+    # ---------------------------------------------------------
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
         scan_tasks = []
         for ip in ip_list:
             for port in range(start_port, end_port + 1):
+                # Do not run the code yet as it still calls stealth_scan_port!
                 scan_tasks.append(executor.submit(stealth_scan_port, ip, port))
                 
         for future in concurrent.futures.as_completed(scan_tasks):
@@ -140,6 +188,9 @@ def threaded_scan(target, start_port, end_port, threads):
                 
     t2 = datetime.now() 
     time_display = str(t2 - t1)[:-3] 
+    # ---------------------------------------------------------
+    # END OF HYBRID CONCURRENT EXECUTION LOGIC (Sathira)
+    # ---------------------------------------------------------
     
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
     print(f"{B}│ {G}SCAN COMPLETE!                                           {B}│{R}")
@@ -147,8 +198,13 @@ def threaded_scan(target, start_port, end_port, threads):
     print(f"{B}│ {Y}Total Time Taken : {C}{time_display:<37} {B}│{R}")
     print(f"{B}└──────────────────────────────────────────────────────────┘{R}\n")
 
+# ==============================================================================
+# END OF PHASE 2 & 3: TARGET PARSING & HYBRID THREADING ENGINE 
+# ==============================================================================
+
+
     # ==============================================================================
-    # PHASE 5: ENTERPRISE REPORTING ENGINE & RISK ASSESSMENT
+    # START OF PHASE 5: ENTERPRISE REPORTING ENGINE & RISK ASSESSMENT
     # Primary Developer: Jaindu
     # ==============================================================================
     print(f"{Y}[*] Generating Enterprise JSON Security Report...{R}")
@@ -196,7 +252,7 @@ def threaded_scan(target, start_port, end_port, threads):
     report_content = {
         "scan_metadata": {
             "tool_name": "NexScan Pro Auditing Suite",
-            "version": "1.1 (Stealth SYN Mode)",
+            "version": "1.3 (Cross-Platform Stealth & Version Detect)",
             "target_network": target_str,
             "port_range_scanned": range_info,
             "scan_start_time": time_now,
@@ -215,23 +271,27 @@ def threaded_scan(target, start_port, end_port, threads):
 
     print(f"{G}[+] Successfully saved enterprise report to: {report_filename}{R}")
     return report_filename 
+    # ==============================================================================
+    # END OF PHASE 5: ENTERPRISE REPORTING ENGINE & RISK ASSESSMENT (Jaindu)
+    # ==============================================================================
+
 
 # ==============================================================================
-# PHASE 4: COMMAND LINE INTERFACE (CLI) & ASCII BANNER
+# START OF PHASE 4: COMMAND LINE INTERFACE (CLI) & ASCII BANNER
 # Primary Developer: Dinara
 # ==============================================================================
 
 if __name__ == "__main__":
     banner = f"""{C}
-  _   _          _____                             _____  _____   ____  
- | \ | |        / ____|                           |  __ \|  __ \ / __ \ 
- |  \| | _____ | (___     ___ __ _ _ __           | |__) | |__) | |  | |
- | . ` |/ _ \ \/ \___ \  / __/ _` | '_  \         |  ___/|  _  /| |  | |
- | |\  |  __/>  <____) || (_| (_| | | | |         | |    | | \ \| |__| |
- |_| \_|\___/_/\_\_____/ \___\__,_|_| |_|         |_|    |_|  \_\\_____/ 
+  _   _           _____                             _____  _____   ____  
+ | \ | |         / ____|                           |  __ \|  __ \ / __ \ 
+ |  \| | _____  | (___    ___ __ _ _ __            | |__) | |__) | |  | |
+ | . ` |/ _ \ \/ \___ \  / __/ _` | '_  \          |  ___/|  _  /| |  | |
+ | |\  |  __/>  <____) || (_| (_| | | | |          | |    | | \ \| |__| |
+ |_| \_|\___/_/\_\_____/ \___\__,_|_| |_|          |_|    |_|  \_\\_____/ 
                                         
  {B}════════════════════════════════════════════════════════════════════════════════════
-               {Y}NexScan Pro - Network Auditing Suite {RD}[STEALTH MODE]{Y}
+         {Y}NexScan Pro - Network Auditing Suite {RD}[STEALTH + VERSION MODE]{Y}
  {B}════════════════════════════════════════════════════════════════════════════════════{R}"""
     print(banner)
     
@@ -244,3 +304,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     threaded_scan(args.target, args.start, args.end, args.threads)
+
+# ==============================================================================
+# END OF PHASE 4: COMMAND LINE INTERFACE (CLI) (Dinara)
+# ==============================================================================
