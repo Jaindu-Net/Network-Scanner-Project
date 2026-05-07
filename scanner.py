@@ -8,12 +8,15 @@ import logging
 import threading 
 import sys       
 import time
+import ssl  
 
 # ==============================================================================
 # CROSS-PLATFORM OS HANDLER & WINDOWS ERROR SILENCER
+# Applies the Errno 9 & 22 suppressions ONLY if the host OS is Windows.
 # ==============================================================================
 if sys.platform.startswith('win'):
     def silent_thread_errors(args):
+        """ Catch and suppress specific Threading OSErrors silently on Windows """
         if issubclass(args.exc_type, OSError) and getattr(args.exc_value, 'errno', None) in (9, 22):
             pass
         else:
@@ -21,88 +24,133 @@ if sys.platform.startswith('win'):
 
     threading.excepthook = silent_thread_errors
 
+# Suppress Scapy runtime warnings for a cleaner CLI experience
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
-from scapy.all import IP, TCP, send, sniff
+from scapy.all import IP, TCP, sr1
 
 # ==============================================================================
 # TERMINAL COLOR CODES
 # ==============================================================================
-G = '\033[92m'  
-C = '\033[96m'  
-Y = '\033[93m'  
-B = '\033[94m'  
-RD = '\033[91m' 
-R = '\033[0m'   
+G = '\033[92m'  # Green 
+C = '\033[96m'  # Cyan 
+Y = '\033[93m'  # Yellow 
+B = '\033[94m'  # Blue 
+RD = '\033[91m' # Red 
+R = '\033[0m'   # Reset 
 
 # ==============================================================================
-# START OF PHASE 1: CORE NETWORKING & SCAN LOGIC (SINGLE SNIFFER ARCHITECTURE)
+# START OF PHASE 1: CORE NETWORKING & SCAN LOGIC
 # Primary Developer: Jaindu
-# Features: Async Packet Sending, Centralized Sniffing, Banner Grabbing
+# Features: Fast Stealth SYN Scan, Multi-Protocol Banner Grabbing
 # ==============================================================================
 
 def get_service_name(port):
+    """ Resolves service name from port number """
     try:
         return socket.getservbyport(port, "tcp")
     except:
         return "unknown"
 
 def grab_banner(ip, port):
+    """ 
+    Advanced Multi-Protocol Banner Grabber (Speed Optimized).
+    Identifies HTTP, HTTPS, SSH, FTP, SMTP, and generic services.
+    """
     try:
+        # Micro-delay to allow target OS TCP stack to recover from SYN scan
+        time.sleep(0.2) 
+        
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(1.5)
+        s.settimeout(2.0) # Optimized timeout for fast scanning
+        
+        # Bypass SSL verification for known HTTPS ports
+        if port in [443, 8443]:
+            context = ssl._create_unverified_context()
+            s = context.wrap_socket(s, server_hostname=ip)
+            
         s.connect((ip, port))
         
-        if port in [80, 8080, 443]:
-            s.send(b"HEAD / HTTP/1.1\r\n\r\n")
+        # 1. Listen-First Ports (SSH, FTP, SMTP, POP3, IMAP)
+        listen_first_ports = [21, 22, 23, 25, 110, 143]
+        if port in listen_first_ports:
+            pass # Wait to receive welcome banner
             
-        banner = s.recv(1024).decode('utf-8', errors='ignore').strip()
+        # 2. HTTP/HTTPS Ports
+        elif port in [80, 8080, 443, 8443]:
+            req = (f"GET / HTTP/1.1\r\n"
+                   f"Host: {ip}\r\n"
+                   f"User-Agent: Mozilla/5.0\r\n"
+                   f"Connection: close\r\n\r\n")
+            s.send(req.encode())
+            
+        # 3. All Other Ports (Generic Probe)
+        else:
+            s.send(b"\r\n\r\n")
+            
+        # Read response efficiently
+        banner_bytes = b""
+        try:
+            while True:
+                data = s.recv(1024)
+                if not data:
+                    break
+                banner_bytes += data
+                # Stop reading early to maximize scan speed
+                if len(banner_bytes) > 256: 
+                    break
+        except socket.timeout:
+            pass 
+            
         s.close()
+        banner = banner_bytes.decode('utf-8', errors='ignore').strip()
         
         if banner:
-            return banner.split('\n')[0].strip()[:40]
-    except:
-        pass
-    return "Version Unknown"
-
-def send_syn_packet(ip, port):
-    """ Fire-and-forget raw SYN packet sender """
-    try:
-        syn_packet = IP(dst=ip)/TCP(dport=port, flags="S")
-        send(syn_packet, verbose=0)
+            # Parse HTTP Responses
+            if "HTTP" in banner.upper():
+                for line in banner.split('\n'):
+                    line = line.strip()
+                    if line.lower().startswith("server:"):
+                        return line.split(":", 1)[1].strip()[:40]
+                return banner.split('\n')[0].strip()[:40]
+                
+            # Parse SSH Responses
+            elif banner.startswith("SSH-"):
+                return banner.split()[0][:40]
+                
+            # Parse generic single-line responses
+            else:
+                clean_line = banner.split('\n')[0].strip()
+                return ''.join(e for e in clean_line if e.isprintable())[:40]
+            
     except Exception:
         pass
+        
+    return "Version Unknown"
 
-def background_sniffer(target_ips, stop_event, open_ports_data):
-    """ Single centralized sniffer to catch all SYN-ACK replies """
-    def packet_callback(packet):
-        if packet.haslayer(TCP) and packet.haslayer(IP):
-            if packet[IP].src in target_ips and packet.getlayer(TCP).flags == 0x12:
-                ip = packet[IP].src
-                port = packet.getlayer(TCP).sport 
+def stealth_scan_port(ip, port):
+    """ Executes a highly optimized Stealth SYN TCP scan using Scapy sr1() """
+    try:
+        syn_packet = IP(dst=ip)/TCP(dport=port, flags="S")
+        # Timeout reduced to 1.0s for massive speed improvement on dead ports
+        response = sr1(syn_packet, timeout=1.0, verbose=0) 
+        
+        if response and response.haslayer(TCP):
+            if response.getlayer(TCP).flags == 0x12: # SYN-ACK detected (Open)
+                service = get_service_name(port)
+                version = grab_banner(ip, port)
                 
-                if not any(d.get('port') == port and d.get('ip') == ip for d in open_ports_data):
-                    service = get_service_name(port)
-                    version = grab_banner(ip, port)
-                    
-                    if version != "Version Unknown":
-                        service_display = f"{service} [{version}]"
-                    else:
-                        service_display = service
-                    
-                    print(f"{G}  {port:>5}/TCP    {service_display:<35}  OPEN (SYN)  ->  {ip}{R}")
-                    
-                    open_ports_data.append({
-                        "ip": ip,
-                        "port": port,
-                        "service": service_display,
-                        "state": "OPEN"
-                    })
-
-    target_filter = " or ".join([f"src host {ip}" for ip in target_ips])
-    sniff_filter = f"tcp and ({target_filter})"
-
-    while not stop_event.is_set():
-        sniff(filter=sniff_filter, prn=packet_callback, store=0, timeout=1)
+                service_display = f"{service} [{version}]" if version != "Version Unknown" else service
+                print(f"{G}  {port:>5}/TCP    {service_display:<35}  OPEN (SYN)  ->  {ip}{R}")
+                
+                return {
+                    "ip": ip,
+                    "port": port,
+                    "service": service_display,
+                    "state": "OPEN"
+                }
+    except Exception:
+        pass
+    return None
 
 # ==============================================================================
 # END OF PHASE 1: CORE NETWORKING & SCAN LOGIC (Jaindu)
@@ -111,8 +159,7 @@ def background_sniffer(target_ips, stop_event, open_ports_data):
 
 # ==============================================================================
 # START OF PHASE 2 & 3: TARGET PARSING & HYBRID MULTI-LEVEL THREADING ENGINE
-# Primary Developer: Sathira (Orchestration logic by Dinara)
-# Subnet Parsing Developer: Jaindu
+# Primary Developer: Sathira (Target Parsing logic handled by Jaindu)
 # ==============================================================================
 
 def threaded_scan(target, start_port, end_port, threads):
@@ -136,16 +183,16 @@ def threaded_scan(target, start_port, end_port, threads):
         except socket.gaierror:
             print(f"\n{RD}[!] CRITICAL ERROR: DNS Resolution failed for '{target}'. Target unreachable.{R}")
             return None
-    # ---------------------------------------------------------
-    # END OF SUBNET PARSING & DNS RESOLUTION LOGIC (Jaindu)
-    # ---------------------------------------------------------
 
     range_info = f"{start_port} to {end_port}"
     time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     total_hosts = len(ip_list)
+    # ---------------------------------------------------------
+    # END OF SUBNET PARSING & DNS RESOLUTION LOGIC (Jaindu)
+    # ---------------------------------------------------------
 
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
-    print(f"{B}│ {C}SCAN INFORMATION (PRO SNIFFER ENGINE)                    {B}│{R}")
+    print(f"{B}│ {C}SCAN INFORMATION (STEALTH + VERSION DETECT)              {B}│{R}")
     print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
     print(f"{B}│ {Y}Target(s)      : {C}{target_str:<39} {B}│{R}")
     print(f"{B}│ {Y}Total Hosts    : {C}{str(total_hosts):<39} {B}│{R}")
@@ -158,48 +205,31 @@ def threaded_scan(target, start_port, end_port, threads):
     open_ports_data = [] 
 
     # ---------------------------------------------------------
-    # START OF SNIFFER ORCHESTRATION & ASYNC EXECUTION
-    # Developed by: Dinara
+    # START OF HYBRID CONCURRENT EXECUTION LOGIC
+    # Developed by: Sathira
     # ---------------------------------------------------------
-    stop_event = threading.Event()
-
-    # Start the background sniffer thread
-    sniffer_thread = threading.Thread(
-        target=background_sniffer,
-        args=(ip_list, stop_event, open_ports_data),
-        daemon=True
-    )
-    sniffer_thread.start()
-
-    # Dispatch SYN packets using Sathira's thread pool architecture
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+        scan_tasks = []
         for ip in ip_list:
             for port in range(start_port, end_port + 1):
-                executor.submit(send_syn_packet, ip, port)
-
-    # Allow 2 seconds for late packets to arrive (Dinara)
-    time.sleep(2.0)
-    
-    # Signal sniffer to stop and wait for it to finish
-    stop_event.set()
-    sniffer_thread.join()
-    # ---------------------------------------------------------
-    # END OF SNIFFER ORCHESTRATION & ASYNC EXECUTION (Dinara)
-    # ---------------------------------------------------------
-    
+                scan_tasks.append(executor.submit(stealth_scan_port, ip, port))
+                
+        for future in concurrent.futures.as_completed(scan_tasks):
+            result_data = future.result()
+            if result_data: 
+                open_ports_data.append(result_data)
+                
     t2 = datetime.now() 
     time_display = str(t2 - t1)[:-3] 
+    # ---------------------------------------------------------
+    # END OF HYBRID CONCURRENT EXECUTION LOGIC (Sathira)
+    # ---------------------------------------------------------
     
     print(f"\n{B}┌──────────────────────────────────────────────────────────┐{R}")
     print(f"{B}│ {G}SCAN COMPLETE!                                           {B}│{R}")
     print(f"{B}├──────────────────────────────────────────────────────────┤{R}")
     print(f"{B}│ {Y}Total Time Taken : {C}{time_display:<37} {B}│{R}")
     print(f"{B}└──────────────────────────────────────────────────────────┘{R}\n")
-
-# ==============================================================================
-# END OF PHASE 2 & 3: TARGET PARSING & HYBRID THREADING ENGINE (Sathira/Dinara)
-# ==============================================================================
-
 
     # ==============================================================================
     # START OF PHASE 5: ENTERPRISE REPORTING ENGINE & RISK ASSESSMENT
@@ -250,7 +280,7 @@ def threaded_scan(target, start_port, end_port, threads):
     report_content = {
         "scan_metadata": {
             "tool_name": "NexScan Pro Auditing Suite",
-            "version": "2.0 (Unified Sniffer Engine)",
+            "version": "1.5 (Cross-Platform Fast Stealth & Multi-Protocol Version Detect)",
             "target_network": target_str,
             "port_range_scanned": range_info,
             "scan_start_time": time_now,
